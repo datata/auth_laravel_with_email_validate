@@ -37,11 +37,13 @@ class AuthController extends Controller
             $user = User::create([
                 'name' => $request->get('name'),
                 'email' => $request->get('email'),
-                'password' => bcrypt($request->password)
+                'password' => bcrypt($request->password),
+                'hash' => md5(rand(0,1000))
             ]);
 
             $user->roles()->attach(self::ROLE_ADMIN);
 
+            dump($user);
             $token = JWTAuth::fromUser($user);
 
             return response()->json(

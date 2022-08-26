@@ -2,9 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\ExampleMail;
 use App\Models\User;
+use Error;
+use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpFoundation\Response;
 use Tymon\JWTAuth\Facades\JWTAuth;
@@ -38,13 +42,14 @@ class AuthController extends Controller
                 'name' => $request->get('name'),
                 'email' => $request->get('email'),
                 'password' => bcrypt($request->password),
-                'hash' => md5(rand(0,1000))
+                'hash' => md5(rand(0, 1000))
             ]);
 
             $user->roles()->attach(self::ROLE_ADMIN);
 
-            dump($user);
             $token = JWTAuth::fromUser($user);
+
+            Mail::to('dani@dani.com')->send(new ExampleMail());
 
             return response()->json(
                 [
@@ -130,6 +135,37 @@ class AuthController extends Controller
                 [
                     'success' => false,
                     'message' => 'Sorry, the user cannot be logged out'
+                ],
+                Response::HTTP_INTERNAL_SERVER_ERROR
+            );
+        }
+    }
+
+    public function activeUser(Request $request)
+    {
+        try {
+            Log::info('Validating account.');
+
+            $user = User::query()
+                ->where('hash', $request->query('hash'))
+                ->where('email', $request->query('email'))
+                ->where('is_active', false)
+                ->firstOrFail();
+            ;
+            $user->is_active = true;
+            $user->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User actived successfully'
+            ], 400);
+        } catch (\Exception $exception) {
+            Log::error('Error validating account -> ' . $exception->getMessage());
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Sorry, the user cannot actived'
                 ],
                 Response::HTTP_INTERNAL_SERVER_ERROR
             );

@@ -22,3 +22,13 @@ Route::group(["middleware" => "jwt.auth"] , function() {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']); 
 });
+
+Route::group(
+    // ["middleware" => "jwt.auth"],
+    [],
+    function() {
+        Route::post('/verify-account', [AuthController::class, 'activeUser']); 
+    }
+);
+
+

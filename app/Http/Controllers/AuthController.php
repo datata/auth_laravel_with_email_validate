@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Mail\ExampleMail;
+use App\Mail\ActivateAccountMail;
 use App\Models\User;
-use Error;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
@@ -22,12 +22,13 @@ class AuthController extends Controller
         try {
             Log::info("Register");
 
+            
             $validator = Validator::make($request->all(), [
                 'name' => 'required|string|max:100',
                 'email' => 'required|string|email|max:100|unique:users',
                 'password' => 'required|string|min:6',
             ]);
-
+            
             if ($validator->fails()) {
                 return response()->json(
                     [
@@ -37,30 +38,43 @@ class AuthController extends Controller
                     Response::HTTP_BAD_REQUEST
                 );
             }
+            
+            DB::beginTransaction();
+            $email = $request->get('email');
+            $name = $request->get('name');
+            $hash = md5(rand(0, 1000));
 
             $user = User::create([
-                'name' => $request->get('name'),
-                'email' => $request->get('email'),
+                'name' => $name,
+                'email' => $email,
                 'password' => bcrypt($request->password),
-                'hash' => md5(rand(0, 1000))
+                'hash' => $hash
             ]);
 
             $user->roles()->attach(self::ROLE_ADMIN);
 
-            $token = JWTAuth::fromUser($user);
+            // $token = JWTAuth::fromUser($user);
 
-            Mail::to('dani@dani.com')->send(new ExampleMail());
+            Mail::to($email)->send(new ActivateAccountMail(
+                $name,
+                $email,
+                $hash,
+                env('APP_URL')
+            ));
+
+            DB::commit();
 
             return response()->json(
                 [
                     "success" => true,
                     "user" => $user,
-                    "token" => $token
+                    // "token" => $token
                 ],
                 Response::HTTP_CREATED
             );
         } catch (\Exception $exception) {
             Log::error('Error register user -> ' . $exception->getMessage());
+            DB::rollBack();
 
             return response()->json(
                 [
@@ -87,6 +101,15 @@ class AuthController extends Controller
                 ], Response::HTTP_UNAUTHORIZED);
             }
 
+            $user = User::query()
+                ->where('email', $request->input('email'))
+                ->where('is_active', true)
+                ->first();;
+
+            if (!$user) {
+                throw new Exception('Account is not activated');
+            }
+
             return response()->json([
                 'success' => true,
                 'token' => $jwtToken,
@@ -94,10 +117,20 @@ class AuthController extends Controller
         } catch (\Exception $exception) {
             Log::error('Error register user -> ' . $exception->getMessage());
 
+            if ($exception->getMessage() === 'Account is not activated') {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'You must activate your account first'
+                    ],
+                    Response::HTTP_UNAUTHORIZED
+                );
+            }
+
             return response()->json(
                 [
                     'success' => false,
-                    'message' => 'Sorry, the user cannot be registered'
+                    'message' => 'Sorry, the user cannot be loggued'
                 ],
                 Response::HTTP_INTERNAL_SERVER_ERROR
             );
@@ -146,26 +179,52 @@ class AuthController extends Controller
         try {
             Log::info('Validating account.');
 
-            $user = User::query()
-                ->where('hash', $request->query('hash'))
-                ->where('email', $request->query('email'))
-                ->where('is_active', false)
-                ->firstOrFail();
-            ;
-            $user->is_active = true;
-            $user->save();
+            if (!$request->query('hash') || !$request->query('email')) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Invalid route'
+                    ],
+                    Response::HTTP_BAD_GATEWAY
+                );
+            }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'User actived successfully'
-            ], 400);
+            $hash = $request->query('hash');
+            $email = str_replace('[at]', '@', $request->query('email'));
+
+            $activeUser = User::query()
+                ->where('hash', $hash)
+                ->where('email', $email)
+                ->where('is_active', false)
+                ->first();;
+
+            if (!$activeUser) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'You account is already activated'
+                    ],
+                    Response::HTTP_BAD_REQUEST
+                );
+            }
+
+            $activeUser->is_active = true;
+            $activeUser->save();
+
+            return response()->json(
+                [
+                    'success' => true,
+                    'message' => 'User account activated successfully'
+                ],
+                Response::HTTP_ACCEPTED
+            );
         } catch (\Exception $exception) {
             Log::error('Error validating account -> ' . $exception->getMessage());
 
             return response()->json(
                 [
                     'success' => false,
-                    'message' => 'Sorry, the user cannot actived'
+                    'message' => 'Sorry, the user account cannot activated'
                 ],
                 Response::HTTP_INTERNAL_SERVER_ERROR
             );
